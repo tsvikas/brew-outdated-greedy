@@ -147,37 +147,45 @@ def main():
         else:
             results["outdated"].append(entry)
 
-    # Print results
-    if results["outdated"]:
-        print(f"\n{'='*60}")
-        print(f" Actually outdated ({len(results['outdated'])})")
-        print(f"{'='*60}")
-        for c in results["outdated"]:
-            print(f"  {c['name']}")
-            print(f"    running:   {c['actual']}")
-            print(f"    latest:    {c['latest']}")
-            if normalize_version(c["brew_installed"]) != normalize_version(c["actual"]):
-                print(f"    (brew receipt: {c['brew_installed']})")
+    # Build rows: (name, running, latest, status)
+    rows = []
+    for c in results["outdated"]:
+        rows.append((c["name"], c["actual"], normalize_version(c["latest"]), "OUTDATED"))
+    for c in results["unknown"]:
+        rows.append((c["name"], c["brew_installed"] + " *", normalize_version(c["latest"]), "UNKNOWN"))
+    for c in results["up_to_date"]:
+        rows.append((c["name"], c["actual"], normalize_version(c["latest"]), "ok"))
 
-    if results["up_to_date"]:
-        print(f"\n{'='*60}")
-        print(f" Already up to date ({len(results['up_to_date'])})")
-        print(f"{'='*60}")
-        for c in results["up_to_date"]:
-            print(f"  {c['name']}  {c['actual']}")
-            if normalize_version(c["brew_installed"]) != normalize_version(c["actual"]):
-                print(f"    (brew receipt outdated: {c['brew_installed']})")
+    if not rows:
+        print("All casks are up to date!")
+        return
 
-    if results["unknown"]:
-        print(f"\n{'='*60}")
-        print(f" Could not detect version ({len(results['unknown'])})")
-        print(f"{'='*60}")
-        for c in results["unknown"]:
-            print(f"  {c['name']}")
-            print(f"    brew receipt: {c['brew_installed']}")
-            print(f"    latest:       {c['latest']}")
+    # Calculate column widths
+    headers = ("Cask", "Running", "Latest", "Status")
+    widths = [max(len(h), max(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+
+    def fmt_row(cols):
+        return "  ".join(c.ljust(w) for c, w in zip(cols, widths))
 
     print()
+    print(fmt_row(headers))
+    print("  ".join("-" * w for w in widths))
+
+    prev_status = None
+    for row in rows:
+        if prev_status and prev_status != row[3]:
+            print()
+        print(fmt_row(row))
+        prev_status = row[3]
+
+    # Summary
+    n_out = len(results["outdated"])
+    n_ok = len(results["up_to_date"])
+    n_unk = len(results["unknown"])
+    print()
+    print(f"{n_out} outdated, {n_ok} already up to date, {n_unk} unknown")
+    if results["unknown"]:
+        print("(* = version from brew receipt, app bundle not found)")
 
 
 if __name__ == "__main__":
