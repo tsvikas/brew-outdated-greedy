@@ -26,24 +26,27 @@ def get_outdated_casks() -> list[dict]:
     return json.loads(r.stdout)["casks"]
 
 
-def get_app_paths(cask_name: str) -> list[str]:
-    """Extract .app paths from cask artifacts."""
-    r = run(["brew", "info", "--cask", "--json=v2", cask_name])
+def get_all_app_paths(cask_names: list[str]) -> dict[str, list[str]]:
+    """Extract .app paths for all casks in a single brew call."""
+    if not cask_names:
+        return {}
+    r = run(["brew", "info", "--cask", "--json=v2"] + cask_names)
     if r.returncode != 0:
-        return []
-    cask = json.loads(r.stdout)["casks"][0]
-    apps = []
-    for artifact in cask.get("artifacts", []):
-        if isinstance(artifact, dict) and "app" in artifact:
-            apps.extend(artifact["app"])
-        # Some casks use 'uninstall' with 'delete' listing .app paths
-        if isinstance(artifact, dict) and "uninstall" in artifact:
-            for entry in artifact["uninstall"]:
-                if isinstance(entry, dict):
-                    for path in entry.get("delete", []):
-                        if path.endswith(".app"):
-                            apps.append(path)
-    return apps
+        return {}
+    result = {}
+    for cask in json.loads(r.stdout)["casks"]:
+        apps = []
+        for artifact in cask.get("artifacts", []):
+            if isinstance(artifact, dict) and "app" in artifact:
+                apps.extend(artifact["app"])
+            if isinstance(artifact, dict) and "uninstall" in artifact:
+                for entry in artifact["uninstall"]:
+                    if isinstance(entry, dict):
+                        for path in entry.get("delete", []):
+                            if path.endswith(".app"):
+                                apps.append(path)
+        result[cask["token"]] = apps
+    return result
 
 
 def read_bundle_version(app_path: str) -> str | None:
@@ -115,12 +118,14 @@ def main():
 
     results = {"outdated": [], "up_to_date": [], "unknown": []}
 
+    app_paths_map = get_all_app_paths([c["name"] for c in casks])
+
     for cask in casks:
         name = cask["name"]
         brew_installed = cask["installed_versions"][0]
         latest = cask["current_version"]
 
-        app_paths = get_app_paths(name)
+        app_paths = app_paths_map.get(name, [])
         actual = None
         for app in app_paths:
             actual = read_bundle_version(app)
