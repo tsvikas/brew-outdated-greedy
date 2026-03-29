@@ -36,6 +36,7 @@ def get_all_app_paths(cask_names: list[str]) -> dict[str, list[str]]:
     result = {}
     for cask in json.loads(r.stdout)["casks"]:
         apps = []
+        bundle_ids = []
         for artifact in cask.get("artifacts", []):
             if isinstance(artifact, dict) and "app" in artifact:
                 apps.extend(artifact["app"])
@@ -45,6 +46,20 @@ def get_all_app_paths(cask_names: list[str]) -> dict[str, list[str]]:
                         for path in entry.get("delete", []):
                             if path.endswith(".app"):
                                 apps.append(path)
+                        # Collect bundle IDs from quit entries for pkg-based casks
+                        for bid in entry.get("quit", []):
+                            bundle_ids.append(bid)
+        # For pkg-based casks with no .app artifact, use mdfind to locate the app
+        if not apps and bundle_ids:
+            for bid in bundle_ids:
+                r = run(["mdfind", f"kMDItemCFBundleIdentifier == '{bid}'"])
+                if r.returncode == 0:
+                    for line in r.stdout.strip().splitlines():
+                        if line.endswith(".app"):
+                            apps.append(line)
+                            break
+                if apps:
+                    break
         result[cask["token"]] = apps
     return result
 
@@ -67,11 +82,21 @@ def read_bundle_version(app_path: str) -> str | None:
         if not os.path.isdir(path):
             continue
 
-        # Try CFBundleShortVersionString first (human-readable)
+        # Read both version keys and pick the most specific one
+        versions = {}
         for key in ["CFBundleShortVersionString", "CFBundleVersion"]:
             r = run(["defaults", "read", info_plist, key])
             if r.returncode == 0 and r.stdout.strip():
-                return r.stdout.strip()
+                versions[key] = r.stdout.strip()
+        short = versions.get("CFBundleShortVersionString")
+        full = versions.get("CFBundleVersion")
+        if short and full:
+            # Prefer the longer version when one is a prefix of the other
+            if full.startswith(short + ".") or full.startswith(short + ","):
+                return full
+            return short
+        if short or full:
+            return short or full
 
         # Fallback: mdls
         r = run(["mdls", "-name", "kMDItemVersion", "-raw", path])
