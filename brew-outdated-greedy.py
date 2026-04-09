@@ -120,8 +120,25 @@ def normalize_version(v: str) -> str:
     return v
 
 
+def parse_version_tuple(v: str) -> tuple:
+    """Parse a version string into a tuple of ints for comparison.
+
+    Non-numeric parts are kept as strings so comparison still works,
+    but numeric segments are compared numerically (2 < 10, not "2" > "10").
+    """
+    import re
+    parts = re.split(r"[.\-]", v)
+    result = []
+    for p in parts:
+        try:
+            result.append(int(p))
+        except ValueError:
+            result.append(p)
+    return tuple(result)
+
+
 def version_matches(actual: str, latest: str) -> bool:
-    """Check if the actual version matches (or contains) the latest version."""
+    """Check if the actual version is the same as or newer than latest."""
     a = normalize_version(actual)
     l = normalize_version(latest)
     # Direct match
@@ -132,6 +149,12 @@ def version_matches(actual: str, latest: str) -> bool:
     # Check if one starts with the other
     if a.startswith(l + ".") or l.startswith(a + "."):
         return True
+    # If actual is newer than latest, it's not outdated
+    try:
+        if parse_version_tuple(a) >= parse_version_tuple(l):
+            return True
+    except TypeError:
+        pass
     return False
 
 
