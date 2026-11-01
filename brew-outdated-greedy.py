@@ -172,11 +172,6 @@ def version_matches(actual: str, latest: str) -> bool:
     # Direct match
     if a == l:
         return True
-    # Vendor respin with a letter suffix on the download (e.g. Shottr
-    # "1.9.3b") while the app itself still reports "1.9.3"
-    import re
-    if re.sub(r"(?<=\d)[a-z]$", "", a) == re.sub(r"(?<=\d)[a-z]$", "", l):
-        return True
     # actual might be the full build string that contains the version
     # e.g. actual="3.3.1.75249" and latest normalized="3.3.1"
     # Check if one starts with the other
