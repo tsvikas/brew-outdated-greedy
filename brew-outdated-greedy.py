@@ -26,20 +26,28 @@ def get_outdated_casks() -> list[dict]:
     return json.loads(r.stdout)["casks"]
 
 
-def get_all_app_paths(cask_names: list[str]) -> dict[str, list[str]]:
-    """Extract .app paths for all casks in a single brew call."""
+def get_all_app_paths(cask_names: list[str]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Extract .app paths and binary symlinks for all casks in a single brew call."""
     if not cask_names:
-        return {}
+        return {}, {}
     r = run(["brew", "info", "--cask", "--json=v2"] + cask_names)
     if r.returncode != 0:
-        return {}
+        return {}, {}
+    prefix = os.environ.get("HOMEBREW_PREFIX", "/opt/homebrew")
     result = {}
+    binaries_map = {}
     for cask in json.loads(r.stdout)["casks"]:
         apps = []
+        binaries = []
         bundle_ids = []
         for artifact in cask.get("artifacts", []):
             if isinstance(artifact, dict) and "app" in artifact:
                 apps.extend(artifact["app"])
+            if isinstance(artifact, dict) and "binary" in artifact:
+                source = artifact["binary"][0]
+                binaries.append(
+                    artifact.get("target") or os.path.join(prefix, "bin", os.path.basename(source))
+                )
             if isinstance(artifact, dict) and "uninstall" in artifact:
                 for entry in artifact["uninstall"]:
                     if isinstance(entry, dict):
@@ -61,7 +69,27 @@ def get_all_app_paths(cask_names: list[str]) -> dict[str, list[str]]:
                 if apps:
                     break
         result[cask["token"]] = apps
-    return result
+        binaries_map[cask["token"]] = binaries
+    return result, binaries_map
+
+
+def read_sdk_version(binary_path: str) -> str | None:
+    """Read version from a VERSION file next to a CLI tool's install root.
+
+    Self-updating CLI SDKs (e.g. gcloud-cli) ship no .app, but keep a
+    VERSION file a few levels above the real binary that the symlink points to.
+    """
+    import re
+    real = Path(os.path.realpath(binary_path))
+    if not real.exists():
+        return None
+    for parent in list(real.parents)[:3]:
+        version_file = parent / "VERSION"
+        if version_file.is_file():
+            v = version_file.read_text().strip()
+            if re.fullmatch(r"\d+(\.\d+)+", v):
+                return v
+    return None
 
 
 def read_bundle_version(app_path: str) -> str | None:
@@ -166,7 +194,7 @@ def main():
 
     results = {"outdated": [], "up_to_date": [], "unknown": []}
 
-    app_paths_map = get_all_app_paths([c["name"] for c in casks])
+    app_paths_map, binaries_map = get_all_app_paths([c["name"] for c in casks])
 
     for cask in casks:
         name = cask["name"]
@@ -179,6 +207,11 @@ def main():
             actual = read_bundle_version(app)
             if actual:
                 break
+        if actual is None:
+            for binary in binaries_map.get(name, []):
+                actual = read_sdk_version(binary)
+                if actual:
+                    break
 
         if actual is None:
             results["unknown"].append({
