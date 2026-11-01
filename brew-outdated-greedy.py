@@ -172,6 +172,11 @@ def version_matches(actual: str, latest: str) -> bool:
     # Direct match
     if a == l:
         return True
+    # Vendor respin with a letter suffix on the download (e.g. Shottr
+    # "1.9.3b") while the app itself still reports "1.9.3"
+    import re
+    if re.sub(r"(?<=\d)[a-z]$", "", a) == re.sub(r"(?<=\d)[a-z]$", "", l):
+        return True
     # actual might be the full build string that contains the version
     # e.g. actual="3.3.1.75249" and latest normalized="3.3.1"
     # Check if one starts with the other
@@ -192,7 +197,7 @@ def main():
         print("All casks are up to date!")
         return
 
-    results = {"outdated": [], "up_to_date": [], "unknown": []}
+    results = {"outdated": [], "up_to_date": [], "missing": [], "unknown": []}
 
     app_paths_map, binaries_map = get_all_app_paths([c["name"] for c in casks])
 
@@ -214,7 +219,10 @@ def main():
                     break
 
         if actual is None:
-            results["unknown"].append({
+            # The cask names an app, but it's not on disk: deleted outside
+            # brew, or a manual installer step that never completed
+            key = "missing" if app_paths and not binaries_map.get(name) else "unknown"
+            results[key].append({
                 "name": name,
                 "brew_installed": brew_installed,
                 "latest": latest,
@@ -237,6 +245,8 @@ def main():
     rows = []
     for c in results["outdated"]:
         rows.append((c["name"], c["actual"], normalize_version(c["latest"]), "OUTDATED"))
+    for c in results["missing"]:
+        rows.append((c["name"], "-", normalize_version(c["latest"]), "MISSING"))
     for c in results["unknown"]:
         rows.append((c["name"], c["brew_installed"] + " *", normalize_version(c["latest"]), "UNKNOWN"))
     for c in results["up_to_date"]:
@@ -268,8 +278,11 @@ def main():
     n_out = len(results["outdated"])
     n_ok = len(results["up_to_date"])
     n_unk = len(results["unknown"])
+    n_miss = len(results["missing"])
     print()
-    print(f"{n_out} outdated, {n_ok} already up to date, {n_unk} unknown")
+    print(f"{n_out} outdated, {n_ok} already up to date, {n_miss} missing, {n_unk} unknown")
+    if results["missing"]:
+        print("(MISSING = brew lists the cask, but its app is not on disk)")
     if results["unknown"]:
         print("(* = version from brew receipt, app bundle not found)")
 
