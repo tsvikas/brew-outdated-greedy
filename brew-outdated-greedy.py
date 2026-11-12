@@ -186,6 +186,37 @@ def version_matches(actual: str, latest: str) -> bool:
     return False
 
 
+def update_size(running: str, latest: str) -> float:
+    """Score how big the jump from running to latest is, on a log10 scale.
+
+    The score is the relative change of the first differing component
+    (log10 of step / running value), minus one per significant digit the
+    versions share before it (leading zeros don't count). So 1.0 -> 2.0
+    scores 0, 1.0 -> 3.0 scores 0.3, 0.2 -> 0.3 scores -0.3, 11.0 -> 12.0
+    scores -1.04, 133 -> 134 (-2.1) outranks 592 -> 593 (-2.8), and
+    1.2.3 -> 1.2.4 scores -2.5.
+
+    Only that one component is compared numerically, so a carry inside it
+    counts by its size (3.29 -> 3.30 scores like 3.28 -> 3.29, not like
+    3.2 -> 3.3), while a carry into an earlier component keeps its rank
+    (1.9.9 -> 2.0.0 scores 0, like 1.0 -> 2.0).
+    """
+    import math
+    import re
+    a = [int(x) for x in re.findall(r"\d+", normalize_version(running))]
+    b = [int(x) for x in re.findall(r"\d+", normalize_version(latest))]
+    a += [0] * (len(b) - len(a))
+    b += [0] * (len(a) - len(b))
+    shared = 0  # significant digits the versions agree on so far
+    for x, y in zip(a, b):
+        if x != y:
+            # A running 0 (0.9 -> 1.0, or a padded 1.2 -> 1.2.1) counts as 1
+            return math.log10(abs(y - x) / max(x, 1)) - shared
+        if shared or x:
+            shared += len(str(x))
+    return -math.inf  # no numeric difference, e.g. only a letter suffix
+
+
 def main():
     casks = get_outdated_casks()
     if not casks:
@@ -235,6 +266,9 @@ def main():
             results["up_to_date"].append(entry)
         else:
             results["outdated"].append(entry)
+
+    # Biggest jumps first
+    results["outdated"].sort(key=lambda c: (-update_size(c["actual"], c["latest"]), c["name"]))
 
     # Build rows: (name, running, latest, status)
     rows = []
