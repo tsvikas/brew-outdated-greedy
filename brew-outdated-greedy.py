@@ -191,9 +191,12 @@ def update_size(running: str, latest: str) -> float:
 
     Read the version as one number: the significant digits the versions
     share, followed by the first differing component (leading zeros don't
-    count). The score is log10 of the step in that component relative to
-    that number. So 1.0 -> 2.0 scores 0, 1.0 -> 3.0 scores 0.3,
-    0.2 -> 0.3 scores -0.3, 11.0 -> 12.0 (1/11) scores -1.04,
+    count), with the running component zero-padded to the latest one's
+    width (1.9 -> 1.10 reads as 109 -> 110). The score is log10 of the
+    step in that component relative to that number. A jump from 0 is read
+    one decade down, as from 1 to ten times the target (0.9 -> 1.0 like
+    1 -> 10, 0.1 -> 2.0 like 1 -> 20). So 1.0 -> 2.0 scores 0,
+    1.0 -> 3.0 scores 0.3, 0.2 -> 0.3 scores -0.3, 11.0 -> 12.0 (1/11) scores -1.04,
     2.6 -> 2.7 (1/26) outranks 0.23.1 -> 0.23.4 (3/231), and
     133 -> 134 (1/133) outranks 592 -> 593 (1/592).
 
@@ -211,8 +214,11 @@ def update_size(running: str, latest: str) -> float:
     prefix = ""  # significant digits the versions agree on so far
     for x, y in zip(a, b):
         if x != y:
-            # A running 0 with no prefix (0.9 -> 1.0) counts as 1
-            base = int(prefix + str(x)) if prefix else max(x, 1)
+            # Pad x to y's width, so 1.9 -> 1.10 reads as 109 -> 110
+            base = int(prefix + str(x).zfill(len(str(y))))
+            if base == 0:
+                # 0 -> n is infinite growth; read it as 1 -> 10n
+                return math.log10(10 * y - 1)
             return math.log10(abs(y - x) / base)
         if prefix or x:
             prefix += str(x)
