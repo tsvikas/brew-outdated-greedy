@@ -189,12 +189,13 @@ def version_matches(actual: str, latest: str) -> bool:
 def update_size(running: str, latest: str) -> float:
     """Score how big the jump from running to latest is, on a log10 scale.
 
-    The score is the relative change of the first differing component
-    (log10 of step / running value), minus one per significant digit the
-    versions share before it (leading zeros don't count). So 1.0 -> 2.0
-    scores 0, 1.0 -> 3.0 scores 0.3, 0.2 -> 0.3 scores -0.3, 11.0 -> 12.0
-    scores -1.04, 133 -> 134 (-2.1) outranks 592 -> 593 (-2.8), and
-    1.2.3 -> 1.2.4 scores -2.5.
+    Read the version as one number: the significant digits the versions
+    share, followed by the first differing component (leading zeros don't
+    count). The score is log10 of the step in that component relative to
+    that number. So 1.0 -> 2.0 scores 0, 1.0 -> 3.0 scores 0.3,
+    0.2 -> 0.3 scores -0.3, 11.0 -> 12.0 (1/11) scores -1.04,
+    2.6 -> 2.7 (1/26) outranks 0.23.1 -> 0.23.4 (3/231), and
+    133 -> 134 (1/133) outranks 592 -> 593 (1/592).
 
     Only that one component is compared numerically, so a carry inside it
     counts by its size (3.29 -> 3.30 scores like 3.28 -> 3.29, not like
@@ -207,13 +208,14 @@ def update_size(running: str, latest: str) -> float:
     b = [int(x) for x in re.findall(r"\d+", normalize_version(latest))]
     a += [0] * (len(b) - len(a))
     b += [0] * (len(a) - len(b))
-    shared = 0  # significant digits the versions agree on so far
+    prefix = ""  # significant digits the versions agree on so far
     for x, y in zip(a, b):
         if x != y:
-            # A running 0 (0.9 -> 1.0, or a padded 1.2 -> 1.2.1) counts as 1
-            return math.log10(abs(y - x) / max(x, 1)) - shared
-        if shared or x:
-            shared += len(str(x))
+            # A running 0 with no prefix (0.9 -> 1.0) counts as 1
+            base = int(prefix + str(x)) if prefix else max(x, 1)
+            return math.log10(abs(y - x) / base)
+        if prefix or x:
+            prefix += str(x)
     return -math.inf  # no numeric difference, e.g. only a letter suffix
 
 
